@@ -1,8 +1,8 @@
-from ultrasonic import Ultrasonic
-from motor import Ordinary_Car
-from servo import Servo
-from infrared import Infrared
-from adc import ADC
+from Server.ultrasonic import Ultrasonic
+from Server.motor import Ordinary_Car
+from Server.servo import Servo
+from Server.infrared import Infrared
+from Server.adc import ADC
 import time
 import sys
 
