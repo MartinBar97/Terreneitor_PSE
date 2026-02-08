@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Robot Seguidor - Monitor en Vivo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: white;
+            padding: 20px;
+            min-height: 100vh;
+        }
+        
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+            padding: 20px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 15px;
+            backdrop-filter: blur(10px);
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .status {
+            font-size: 1.2em;
+            color: #4ade80;
+        }
+        
+        .status.disconnected {
+            color: #f87171;
+        }
+        
+        /* Panel de sensores */
+        .sensor-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 30px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+            color: #1e293b;
+        }
+        
+        .sensor-title {
+            font-size: 1.5em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #1e40af;
+        }
+        
+        .sensor-visual {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin: 30px 0;
+        }
+        
+        .sensor-box {
+            width: 120px;
+            height: 120px;
+            border-radius: 15px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3em;
+            font-weight: bold;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+        }
+        
+        .sensor-box.on {
+            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            color: white;
+            transform: scale(1.05);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+        }
+        
+        .sensor-box.off {
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            color: #94a3b8;
+        }
+        
+        .sensor-labels {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-top: 10px;
+        }
+        
+        .sensor-label {
+            width: 120px;
+            text-align: center;
+            font-weight: bold;
+            color: #64748b;
+        }
+        
+        /* Datos del robot */
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .data-item {
+            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+            padding: 20px;
+            border-radius: 12px;
+            border-left: 4px solid #3b82f6;
+        }
+        
+        .data-label {
+            font-size: 0.9em;
+            color: #64748b;
+            margin-bottom: 5px;
+        }
+        
+        .data-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #1e293b;
+        }
+        
+        .data-value.error {
+            color: #dc2626;
+        }
+        
+        .data-value.correction {
+            color: #2563eb;
+        }
+        
+        .data-value.speed {
+            color: #059669;
+        }
+        
+        /* Botón de emergencia */
+        .emergency-section {
+            margin-top: 20px;
+        }
+        
+        .emergency-button {
+            width: 100%;
+            padding: 30px;
+            font-size: 2em;
+            font-weight: bold;
+            border: none;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .emergency-button.active {
+            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            color: white;
+        }
+        
+        .emergency-button.active:hover {
+            background: linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%);
+            transform: scale(1.05);
+        }
+        
+        .emergency-button.active:active {
+            transform: scale(0.95);
+        }
+        
+        .emergency-button.stopped {
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            color: white;
+        }
+        
+        .emergency-button.stopped:hover {
+            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+        }
+        
+        /* Log de consola */
+        .console {
+            background: #1e293b;
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+            max-height: 300px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+        }
+        
+        .console-line {
+            padding: 5px 0;
+            color: #94a3b8;
+        }
+        
+        .console-line.error {
+            color: #f87171;
+        }
+        
+        .console-line.warning {
+            color: #fbbf24;
+        }
+        
+        .console-line.info {
+            color: #60a5fa;
+        }
+        
+        /* Indicador de conexión */
+        .connection-indicator {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #10b981;
+            box-shadow: 0 0 20px #10b981;
+            animation: pulse 2s infinite;
+        }
+        
+        .connection-indicator.disconnected {
+            background: #dc2626;
+            box-shadow: 0 0 20px #dc2626;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        /* Responsive */
+        @media (max-width: 600px) {
+            .data-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .sensor-box {
+                width: 90px;
+                height: 90px;
+                font-size: 2em;
+            }
+            
+            .sensor-label {
+                width: 90px;
+                font-size: 0.9em;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="connection-indicator" id="connectionIndicator"></div>
+    
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Robot Seguidor de Líneas</h1>
+            <div class="status" id="statusText">Conectando...</div>
+        </div>
+        
+        <!-- Panel de sensores -->
+        <div class="sensor-panel">
+            <div class="sensor-title">📡 Sensores de Línea</div>
+            
+            <div class="sensor-visual">
+                <div class="sensor-box off" id="sensorLeft">░</div>
+                <div class="sensor-box off" id="sensorCenter">░</div>
+                <div class="sensor-box off" id="sensorRight">░</div>
+            </div>
+            
+            <div class="sensor-labels">
+                <div class="sensor-label">Izquierda</div>
+                <div class="sensor-label">Centro</div>
+                <div class="sensor-label">Derecha</div>
+            </div>
+            
+            <!-- Datos del robot -->
+            <div class="data-grid">
+                <div class="data-item">
+                    <div class="data-label">Error de posición</div>
+                    <div class="data-value error" id="errorValue">0.00</div>
+                </div>
+                
+                <div class="data-item">
+                    <div class="data-label">Corrección PID</div>
+                    <div class="data-value correction" id="correctionValue">0</div>
+                </div>
+                
+                <div class="data-item">
+                    <div class="data-label">Velocidad actual</div>
+                    <div class="data-value speed" id="speedValue">0</div>
+                </div>
+                
+                <div class="data-item">
+                    <div class="data-label">Distancia obstáculo</div>
+                    <div class="data-value" id="distanceValue">-- cm</div>
+                </div>
+            </div>
+            
+            <div class="data-item" style="margin-top: 15px;">
+                <div class="data-label">Iteraciones</div>
+                <div class="data-value" id="iterationValue">0</div>
+            </div>
+        </div>
+        
+        <!-- Botón de emergencia -->
+        <div class="emergency-section">
+            <button class="emergency-button active" id="emergencyButton" onclick="toggleEmergency()">
+                🛑 PARADA DE EMERGENCIA
+            </button>
+        </div>
+        
+        <!-- Consola de logs -->
+        <div class="console" id="console">
+            <div class="console-line info">Esperando conexión con el robot...</div>
+        </div>
+    </div>
+    
+    <script>
+        let ws = null;
+        let isEmergencyActive = false;
+        let reconnectInterval = null;
+        
+        // Conectar al WebSocket del robot
+        function connect() {
+            const host = window.location.hostname || 'localhost';
+            const port = 8765;  // Puerto WebSocket
+            
+            try {
+                ws = new WebSocket(`ws://${host}:${port}`);
+                
+                ws.onopen = function() {
+                    console.log('Conectado al robot');
+                    updateStatus('Conectado al robot', true);
+                    addConsoleLog('✓ Conexión establecida', 'info');
+                    
+                    if (reconnectInterval) {
+                        clearInterval(reconnectInterval);
+                        reconnectInterval = null;
+                    }
+                };
+                
+                ws.onmessage = function(event) {
+                    try {
+                        const data = JSON.parse(event.data);
+                        updateDisplay(data);
+                    } catch (e) {
+                        console.error('Error parsing data:', e);
+                    }
+                };
+                
+                ws.onerror = function(error) {
+                    console.error('WebSocket error:', error);
+                    updateStatus('Error de conexión', false);
+                    addConsoleLog('❌ Error de conexión', 'error');
+                };
+                
+                ws.onclose = function() {
+                    console.log('Desconectado del robot');
+                    updateStatus('Desconectado - Reintentando...', false);
+                    addConsoleLog('⚠️  Conexión perdida - Reintentando...', 'warning');
+                    
+                    // Reintentar conexión cada 3 segundos
+                    if (!reconnectInterval) {
+                        reconnectInterval = setInterval(connect, 3000);
+                    }
+                };
+                
+            } catch (e) {
+                console.error('Error al conectar:', e);
+                updateStatus('Error al conectar', false);
+            }
+        }
+        
+        // Actualizar visualización con datos del robot
+        function updateDisplay(data) {
+            // Actualizar sensores visuales
+            updateSensor('sensorLeft', data.sensor_left);
+            updateSensor('sensorCenter', data.sensor_center);
+            updateSensor('sensorRight', data.sensor_right);
+            
+            // Actualizar valores
+            document.getElementById('errorValue').textContent = data.error.toFixed(2);
+            document.getElementById('correctionValue').textContent = Math.round(data.correction);
+            document.getElementById('speedValue').textContent = data.speed;
+            document.getElementById('distanceValue').textContent = data.distance + ' cm';
+            document.getElementById('iterationValue').textContent = data.iterations;
+            
+            // Log en consola
+            const visual = (data.sensor_left ? '█' : '░') + 
+                          (data.sensor_center ? '█' : '░') + 
+                          (data.sensor_right ? '█' : '░');
+            
+            const logLine = `${visual} | Err:${data.error.toFixed(2)} | Corr:${Math.round(data.correction)} | Vel:${data.speed} | #${data.iterations}`;
+            addConsoleLog(logLine, '');
+        }
+        
+        // Actualizar sensor individual
+        function updateSensor(elementId, isActive) {
+            const element = document.getElementById(elementId);
+            if (isActive) {
+                element.classList.remove('off');
+                element.classList.add('on');
+                element.textContent = '█';
+            } else {
+                element.classList.remove('on');
+                element.classList.add('off');
+                element.textContent = '░';
+            }
+        }
+        
+        // Actualizar estado de conexión
+        function updateStatus(text, connected) {
+            const statusElement = document.getElementById('statusText');
+            const indicator = document.getElementById('connectionIndicator');
+            
+            statusElement.textContent = text;
+            
+            if (connected) {
+                statusElement.classList.remove('disconnected');
+                indicator.classList.remove('disconnected');
+            } else {
+                statusElement.classList.add('disconnected');
+                indicator.classList.add('disconnected');
+            }
+        }
+        
+        // Botón de emergencia
+        function toggleEmergency() {
+            isEmergencyActive = !isEmergencyActive;
+            
+            const button = document.getElementById('emergencyButton');
+            
+            if (isEmergencyActive) {
+                button.classList.remove('active');
+                button.classList.add('stopped');
+                button.textContent = '✓ ROBOT DETENIDO - Click para reanudar';
+                addConsoleLog('🚨 PARADA DE EMERGENCIA ACTIVADA', 'error');
+            } else {
+                button.classList.remove('stopped');
+                button.classList.add('active');
+                button.textContent = '🛑 PARADA DE EMERGENCIA';
+                addConsoleLog('✓ Robot reanudado', 'info');
+            }
+            
+            // Enviar comando al robot
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    command: 'emergency_stop',
+                    active: isEmergencyActive
+                }));
+            }
+        }
+        
+        // Añadir línea a la consola
+        function addConsoleLog(message, type) {
+            const consoleElement = document.getElementById('console');
+            const line = document.createElement('div');
+            line.className = 'console-line ' + type;
+            
+            const timestamp = new Date().toLocaleTimeString();
+            line.textContent = `[${timestamp}] ${message}`;
+            
+            consoleElement.appendChild(line);
+            
+            // Mantener solo últimas 50 líneas
+            while (consoleElement.children.length > 50) {
+                consoleElement.removeChild(consoleElement.firstChild);
+            }
+            
+            // Auto-scroll al final
+            consoleElement.scrollTop = consoleElement.scrollHeight;
+        }
+        
+        // Iniciar conexión al cargar la página
+        window.onload = function() {
+            connect();
+        };
+        
+        // Cerrar conexión al salir
+        window.onbeforeunload = function() {
+            if (ws) {
+                ws.close();
+            }
+        };
+    </script>
+</body>
+</html>
