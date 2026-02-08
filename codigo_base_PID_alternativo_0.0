@@ -1,0 +1,518 @@
+#!/usr/bin/env python3
+"""
+Robot Seguidor de Líneas con Ruedas Mecanum - FREENOVE
+Control PID + Threading + Clases Originales Freenove
+
+Usa las clases reales del servidor Freenove:
+- infrared.py: Para sensores de línea
+- motor.py: Para control de motores (Ordinary_Car)
+- Rango de motores: -4095 a +4095
+"""
+
+import sys
+import os
+import time
+import threading
+from collections import deque
+
+# Agregar el directorio Server al path para importar los módulos
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'Server'))
+
+from infrared import Infrared
+from motor import Ordinary_Car
+
+# ==================== PARÁMETROS DE CONTROL ====================
+
+# Parámetros PID optimizados para seguimiento de línea
+KP = 800.0    # Ganancia proporcional (aumentado para rango -4095 a 4095)
+KI = 50.0     # Ganancia integral
+KD = 120.0    # Ganancia derivativa
+
+# Velocidad base de los motores (en rango -4095 a +4095)
+BASE_SPEED = 1200   # Velocidad nominal para avanzar
+MAX_CORRECTION = 2500  # Corrección máxima permitida
+
+# Configuración del sistema
+SAMPLE_TIME = 0.01  # Tiempo de muestreo en segundos (100 Hz)
+QUEUE_SIZE = 5      # Tamaño del buffer para filtrado (reducido para más respuesta)
+
+# Mapeo de patrones de sensores a error de posición
+# Los sensores usan gpiozero.LineSensor que devuelve:
+# value=1 cuando detecta LÍNEA NEGRA
+# value=0 cuando detecta FONDO BLANCO
+
+# La función read_all_infrared() devuelve:
+# (sensor1 << 2) | (sensor2 << 1) | sensor3
+# sensor1=izquierda, sensor2=centro, sensor3=derecha
+
+SENSOR_ERROR_MAP = {
+    0b000: None,     # 0: Todos en blanco - fuera de línea
+    0b001: 1.0,      # 1: Solo derecha en negro - girar DERECHA
+    0b010: 0.0,      # 2: Solo centro en negro - CENTRADO
+    0b011: 0.5,      # 3: Centro + derecha - ligeramente DERECHA
+    0b100: -1.0,     # 4: Solo izquierda - girar IZQUIERDA
+    0b101: 0.0,      # 5: Izquierda + derecha (sin centro) - CENTRADO
+    0b110: -0.5,     # 6: Izquierda + centro - ligeramente IZQUIERDA
+    0b111: 0.0       # 7: Todos en negro - intersección, continuar recto
+}
+
+
+# ==================== CLASE SENSOR CON THREADING ====================
+
+class LineSensorThread:
+    """
+    Clase para gestionar la lectura de sensores en un thread separado.
+    Usa la clase Infrared de Freenove con filtrado de media móvil.
+    """
+    
+    def __init__(self):
+        # Crear instancia de sensores Freenove
+        self.infrared = Infrared()
+        
+        # Buffer circular para filtrado
+        self.buffer = deque(maxlen=QUEUE_SIZE)
+        
+        # Estado actual
+        self.current_value = 0
+        self.current_error = 0.0
+        
+        # Control de threading
+        self.running = False
+        self.thread = None
+        self.lock = threading.Lock()
+        
+        print("✓ Sensores infrarrojos inicializados")
+    
+    def start(self):
+        """Inicia el thread de lectura de sensores"""
+        self.running = True
+        self.thread = threading.Thread(target=self._read_loop, daemon=True)
+        self.thread.start()
+        print("✓ Thread de sensores iniciado")
+    
+    def stop(self):
+        """Detiene el thread de lectura"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=1.0)
+        self.infrared.close()
+        print("✓ Thread de sensores detenido")
+    
+    def _read_loop(self):
+        """Bucle principal de lectura de sensores"""
+        while self.running:
+            try:
+                # Leer sensores usando la clase Freenove
+                sensor_value = self.infrared.read_all_infrared()
+                
+                # Agregar al buffer
+                self.buffer.append(sensor_value)
+                
+                # Calcular moda (valor más frecuente) para filtrado
+                if len(self.buffer) > 0:
+                    # Contar ocurrencias de cada valor
+                    counts = {}
+                    for val in self.buffer:
+                        counts[val] = counts.get(val, 0) + 1
+                    
+                    # Obtener el valor más frecuente
+                    filtered_value = max(counts, key=counts.get)
+                    
+                    # Calcular error de posición
+                    error = SENSOR_ERROR_MAP.get(filtered_value, None)
+                    
+                    # Actualizar estado con lock
+                    with self.lock:
+                        self.current_value = filtered_value
+                        self.current_error = error
+                
+                time.sleep(SAMPLE_TIME)
+                
+            except Exception as e:
+                print(f"Error en lectura de sensores: {e}")
+                time.sleep(0.1)
+    
+    def get_error(self):
+        """Obtiene el error de posición actual"""
+        with self.lock:
+            return self.current_error
+    
+    def get_raw_value(self):
+        """Obtiene el valor crudo de los sensores para debugging"""
+        with self.lock:
+            return self.current_value
+
+
+# ==================== CLASE CONTROLADOR PID ====================
+
+class PIDController:
+    """
+    Controlador PID para seguimiento de línea.
+    Optimizado para el rango de motores Freenove (-4095 a +4095).
+    """
+    
+    def __init__(self, kp, ki, kd, sample_time):
+        self.kp = kp
+        self.ki = ki
+        self.kd = kd
+        self.sample_time = sample_time
+        
+        # Estados internos
+        self.last_error = 0.0
+        self.integral = 0.0
+        self.last_time = time.time()
+        self.last_output = 0.0
+        
+        # Límites de integral (anti-windup)
+        self.integral_max = 500.0
+        self.integral_min = -500.0
+        
+        # Control de threading
+        self.lock = threading.Lock()
+        
+        print(f"✓ PID inicializado (Kp={kp}, Ki={ki}, Kd={kd})")
+    
+    def compute(self, error):
+        """
+        Calcula la salida del controlador PID.
+        
+        Args:
+            error (float): Error actual de posición (-1.0 a +1.0)
+            
+        Returns:
+            float: Señal de control (corrección para motores)
+        """
+        with self.lock:
+            current_time = time.time()
+            dt = current_time - self.last_time
+            
+            # Evitar división por cero
+            if dt < 0.001:
+                return self.last_output
+            
+            # Término Proporcional
+            p_term = self.kp * error
+            
+            # Término Integral (con anti-windup)
+            self.integral += error * dt
+            self.integral = max(self.integral_min, 
+                              min(self.integral_max, self.integral))
+            i_term = self.ki * self.integral
+            
+            # Término Derivativo
+            derivative = (error - self.last_error) / dt
+            d_term = self.kd * derivative
+            
+            # Salida total
+            output = p_term + i_term + d_term
+            
+            # Limitar salida al máximo permitido
+            output = max(-MAX_CORRECTION, min(MAX_CORRECTION, output))
+            
+            # Actualizar estados
+            self.last_error = error
+            self.last_time = current_time
+            self.last_output = output
+            
+            return output
+    
+    def reset(self):
+        """Reinicia el controlador PID"""
+        with self.lock:
+            self.integral = 0.0
+            self.last_error = 0.0
+            self.last_time = time.time()
+            self.last_output = 0.0
+
+
+# ==================== CLASE CONTROL DE MOTORES ====================
+
+class MotorControlThread:
+    """
+    Controlador para motores con ruedas Mecanum usando la clase Ordinary_Car.
+    Implementa threading para control suave con rampa de aceleración.
+    """
+    
+    def __init__(self):
+        # Crear instancia del controlador de motores Freenove
+        self.motor = Ordinary_Car()
+        
+        # Control de threading
+        self.running = False
+        self.thread = None
+        self.lock = threading.Lock()
+        
+        # Velocidades objetivo (duty cycle: -4095 a +4095)
+        self.target_speeds = {
+            'FL': 0,  # Front Left (Motor 1)
+            'BL': 0,  # Back Left (Motor 2)
+            'FR': 0,  # Front Right (Motor 3)
+            'BR': 0   # Back Right (Motor 4)
+        }
+        
+        # Velocidades actuales
+        self.current_speeds = {
+            'FL': 0,
+            'BL': 0,
+            'FR': 0,
+            'BR': 0
+        }
+        
+        print("✓ Motores Freenove inicializados")
+    
+    def start(self):
+        """Inicia el thread de control de motores"""
+        self.running = True
+        self.thread = threading.Thread(target=self._control_loop, daemon=True)
+        self.thread.start()
+        print("✓ Thread de motores iniciado")
+    
+    def stop(self):
+        """Detiene todos los motores y el thread"""
+        self.running = False
+        if self.thread:
+            self.thread.join(timeout=1.0)
+        
+        # Detener motores
+        self.motor.set_motor_model(0, 0, 0, 0)
+        self.motor.close()
+        print("✓ Thread de motores detenido")
+    
+    def _control_loop(self):
+        """Bucle de control de motores con rampa suave"""
+        ramp_rate = 100  # Cambio máximo por iteración (ajustable)
+        
+        while self.running:
+            try:
+                with self.lock:
+                    targets = self.target_speeds.copy()
+                
+                # Aplicar rampa suave a cada motor
+                changed = False
+                for motor in self.current_speeds:
+                    diff = targets[motor] - self.current_speeds[motor]
+                    if abs(diff) > ramp_rate:
+                        self.current_speeds[motor] += ramp_rate if diff > 0 else -ramp_rate
+                        changed = True
+                    else:
+                        self.current_speeds[motor] = targets[motor]
+                        if diff != 0:
+                            changed = True
+                
+                # Solo actualizar motores si hay cambios
+                if changed:
+                    self.motor.set_motor_model(
+                        int(self.current_speeds['FL']),
+                        int(self.current_speeds['BL']),
+                        int(self.current_speeds['FR']),
+                        int(self.current_speeds['BR'])
+                    )
+                
+                time.sleep(SAMPLE_TIME)
+                
+            except Exception as e:
+                print(f"Error en control de motores: {e}")
+                time.sleep(0.1)
+    
+    def set_mecanum_motion(self, forward_speed, correction):
+        """
+        Configura movimiento con ruedas Mecanum.
+        
+        Para seguimiento de línea, usamos principalmente movimiento hacia adelante
+        con corrección de rotación.
+        
+        Args:
+            forward_speed (int): Velocidad hacia adelante (-4095 a +4095)
+            correction (float): Corrección de dirección (PID output)
+        """
+        with self.lock:
+            # Cinemática para ruedas Mecanum en seguimiento de línea
+            # Corrección positiva = girar derecha, negativa = girar izquierda
+            
+            # Motor mapping según Ordinary_Car:
+            # Motor 1 (duty1) = Left Upper (Front Left)
+            # Motor 2 (duty2) = Left Lower (Back Left)  
+            # Motor 3 (duty3) = Right Upper (Front Right)
+            # Motor 4 (duty4) = Right Lower (Back Right)
+            
+            self.target_speeds['FL'] = int(forward_speed - correction)  # Motor 1
+            self.target_speeds['BL'] = int(forward_speed - correction)  # Motor 2
+            self.target_speeds['FR'] = int(forward_speed + correction)  # Motor 3
+            self.target_speeds['BR'] = int(forward_speed + correction)  # Motor 4
+    
+    def stop_all(self):
+        """Detiene todos los motores inmediatamente"""
+        with self.lock:
+            self.target_speeds = {'FL': 0, 'BL': 0, 'FR': 0, 'BR': 0}
+        
+        self.motor.set_motor_model(0, 0, 0, 0)
+
+
+# ==================== CLASE PRINCIPAL ====================
+
+class LineFollowerRobot:
+    """
+    Clase principal que integra sensores, PID y motores para seguimiento de línea.
+    Usa las clases originales de Freenove.
+    """
+    
+    def __init__(self):
+        print("\n" + "="*60)
+        print("  ROBOT SEGUIDOR DE LÍNEAS FREENOVE - MECANUM")
+        print("  Control PID + Threading + Clases Originales")
+        print("="*60 + "\n")
+        
+        # Componentes del sistema
+        self.sensors = LineSensorThread()
+        self.pid = PIDController(KP, KI, KD, SAMPLE_TIME)
+        self.motors = MotorControlThread()
+        
+        # Estado del robot
+        self.running = False
+        self.main_thread = None
+        self.last_valid_error = 0.0  # Para cuando se pierde la línea
+        
+        # Estadísticas
+        self.stats = {
+            'iterations': 0,
+            'line_lost_count': 0,
+            'start_time': None
+        }
+    
+    def start(self):
+        """Inicia el sistema de seguimiento de línea"""
+        print("Iniciando sistema...")
+        
+        # Iniciar componentes
+        self.sensors.start()
+        self.motors.start()
+        time.sleep(0.5)  # Dar tiempo para estabilización
+        
+        # Resetear PID
+        self.pid.reset()
+        
+        # Iniciar bucle principal
+        self.running = True
+        self.stats['start_time'] = time.time()
+        self.main_thread = threading.Thread(target=self._main_loop, daemon=True)
+        self.main_thread.start()
+        
+        print("\n✓ Sistema iniciado correctamente")
+        print("  Presiona Ctrl+C para detener\n")
+    
+    def stop(self):
+        """Detiene el sistema completo"""
+        print("\nDeteniendo sistema...")
+        
+        self.running = False
+        
+        if self.main_thread:
+            self.main_thread.join(timeout=1.0)
+        
+        self.motors.stop()
+        self.sensors.stop()
+        
+        # Mostrar estadísticas
+        self._print_stats()
+        
+        print("✓ Sistema detenido\n")
+    
+    def _main_loop(self):
+        """Bucle principal de control"""
+        while self.running:
+            try:
+                # Leer error de posición
+                error = self.sensors.get_error()
+                
+                # Manejar pérdida de línea
+                if error is None:
+                    # Línea perdida - usar último error válido
+                    error = self.last_valid_error
+                    self.stats['line_lost_count'] += 1
+                else:
+                    self.last_valid_error = error
+                
+                # Calcular corrección PID
+                correction = self.pid.compute(error)
+                
+                # Aplicar velocidad base y corrección
+                self.motors.set_mecanum_motion(BASE_SPEED, correction)
+                
+                # Actualizar estadísticas
+                self.stats['iterations'] += 1
+                
+                # Mostrar información cada 100 iteraciones
+                if self.stats['iterations'] % 100 == 0:
+                    self._print_status(error, correction)
+                
+                time.sleep(SAMPLE_TIME)
+                
+            except Exception as e:
+                print(f"Error en bucle principal: {e}")
+                time.sleep(0.1)
+    
+    def _print_status(self, error, correction):
+        """Imprime estado actual del sistema"""
+        sensor_value = self.sensors.get_raw_value()
+        
+        # Decodificar valor de sensores a formato visual
+        sensor_bits = f"{sensor_value:03b}"
+        sensor_str = ''.join(['█' if bit == '1' else '░' for bit in sensor_bits])
+        
+        print(f"Sensores: {sensor_str}  |  "
+              f"Valor: {sensor_value}  |  "
+              f"Error: {error:+.2f}  |  "
+              f"Corrección: {correction:+.1f}  |  "
+              f"Iter: {self.stats['iterations']}")
+    
+    def _print_stats(self):
+        """Imprime estadísticas finales"""
+        elapsed = time.time() - self.stats['start_time']
+        
+        print("\n" + "="*60)
+        print("  ESTADÍSTICAS DE EJECUCIÓN")
+        print("="*60)
+        print(f"  Tiempo total: {elapsed:.2f} s")
+        print(f"  Iteraciones: {self.stats['iterations']}")
+        print(f"  Frecuencia promedio: {self.stats['iterations']/elapsed:.1f} Hz")
+        print(f"  Veces fuera de línea: {self.stats['line_lost_count']}")
+        print(f"  % en línea: {100*(1-self.stats['line_lost_count']/max(1,self.stats['iterations'])):.1f}%")
+        print("="*60 + "\n")
+
+
+# ==================== PROGRAMA PRINCIPAL ====================
+
+def main():
+    """Función principal"""
+    robot = None
+    
+    try:
+        # Verificar que estamos en el directorio correcto
+        if not os.path.exists('Server/infrared.py'):
+            print("❌ Error: No se encuentra el directorio 'Server'")
+            print("   Ejecuta este script desde el directorio Terreneitor_PSE")
+            sys.exit(1)
+        
+        # Crear e iniciar robot
+        robot = LineFollowerRobot()
+        robot.start()
+        
+        # Mantener programa ejecutándose
+        while True:
+            time.sleep(1)
+    
+    except KeyboardInterrupt:
+        print("\n\nInterrupción detectada...")
+    
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    finally:
+        if robot:
+            robot.stop()
+
+
+if __name__ == "__main__":
+    main()
