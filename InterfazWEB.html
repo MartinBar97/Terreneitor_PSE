@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Robot Seguidor - Monitor en Vivo</title>
+    <title>Robot Seguidor - Control</title>
     <style>
         * {
             margin: 0;
@@ -13,318 +13,389 @@
         
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            background: #1e293b;
             color: white;
             padding: 20px;
             min-height: 100vh;
         }
         
         .container {
-            max-width: 800px;
+            max-width: 1000px;
             margin: 0 auto;
         }
         
         .header {
             text-align: center;
-            margin-bottom: 30px;
-            padding: 20px;
-            background: rgba(255, 255, 255, 0.1);
-            border-radius: 15px;
-            backdrop-filter: blur(10px);
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #334155;
+            border-radius: 10px;
         }
         
         .header h1 {
-            font-size: 2.5em;
-            margin-bottom: 10px;
+            font-size: 1.8em;
+            margin-bottom: 5px;
         }
         
         .status {
-            font-size: 1.2em;
-            color: #4ade80;
+            font-size: 1em;
+            color: #10b981;
         }
         
         .status.disconnected {
-            color: #f87171;
+            color: #ef4444;
+        }
+        
+        /* Grid principal */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 20px;
+            margin-bottom: 20px;
         }
         
         /* Panel de sensores */
-        .sensor-panel {
-            background: rgba(255, 255, 255, 0.95);
-            border-radius: 20px;
-            padding: 30px;
-            margin-bottom: 20px;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
-            color: #1e293b;
+        .panel {
+            background: #334155;
+            border-radius: 10px;
+            padding: 20px;
         }
         
-        .sensor-title {
-            font-size: 1.5em;
+        .panel-title {
+            font-size: 1.2em;
             font-weight: bold;
-            margin-bottom: 20px;
-            color: #1e40af;
+            margin-bottom: 15px;
+            border-bottom: 2px solid #475569;
+            padding-bottom: 10px;
         }
         
         .sensor-visual {
             display: flex;
             justify-content: center;
-            gap: 15px;
-            margin: 30px 0;
+            gap: 10px;
+            margin: 20px 0;
         }
         
         .sensor-box {
-            width: 120px;
-            height: 120px;
-            border-radius: 15px;
+            width: 100px;
+            height: 100px;
+            border-radius: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
-            font-size: 3em;
+            font-size: 2.5em;
             font-weight: bold;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            transition: all 0.2s ease;
         }
         
         .sensor-box.on {
-            background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+            background: #1e293b;
             color: white;
-            transform: scale(1.05);
-            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.4);
+            border: 3px solid #3b82f6;
         }
         
         .sensor-box.off {
-            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
+            background: #64748b;
             color: #94a3b8;
+            border: 3px solid #475569;
         }
         
         .sensor-labels {
             display: flex;
             justify-content: center;
-            gap: 15px;
-            margin-top: 10px;
+            gap: 10px;
         }
         
         .sensor-label {
-            width: 120px;
+            width: 100px;
             text-align: center;
-            font-weight: bold;
-            color: #64748b;
+            font-size: 0.9em;
+            color: #94a3b8;
         }
         
-        /* Datos del robot */
-        .data-grid {
-            display: grid;
-            grid-template-columns: repeat(2, 1fr);
-            gap: 15px;
-            margin: 20px 0;
-        }
-        
-        .data-item {
-            background: linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
-            padding: 20px;
-            border-radius: 12px;
+        /* Datos */
+        .data-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px;
+            margin: 8px 0;
+            background: #1e293b;
+            border-radius: 8px;
             border-left: 4px solid #3b82f6;
         }
         
         .data-label {
-            font-size: 0.9em;
-            color: #64748b;
-            margin-bottom: 5px;
+            color: #94a3b8;
+            font-size: 0.95em;
         }
         
         .data-value {
-            font-size: 1.8em;
+            font-size: 1.3em;
             font-weight: bold;
-            color: #1e293b;
         }
         
-        .data-value.error {
-            color: #dc2626;
+        /* Control PID */
+        .pid-control {
+            margin-top: 15px;
         }
         
-        .data-value.correction {
-            color: #2563eb;
+        .pid-slider {
+            margin: 15px 0;
         }
         
-        .data-value.speed {
-            color: #059669;
+        .pid-slider-label {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 0.95em;
         }
         
-        /* Botón de emergencia */
-        .emergency-section {
+        .pid-name {
+            color: #94a3b8;
+        }
+        
+        .pid-value {
+            color: #3b82f6;
+            font-weight: bold;
+            min-width: 80px;
+            text-align: right;
+        }
+        
+        input[type="range"] {
+            width: 100%;
+            height: 8px;
+            border-radius: 5px;
+            background: #1e293b;
+            outline: none;
+            -webkit-appearance: none; 
+        }
+        
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+        }
+        
+        input[type="range"]::-moz-range-thumb {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            background: #3b82f6;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .pid-reset {
+            width: 100%;
+            padding: 10px;
+            margin-top: 10px;
+            background: #475569;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.95em;
+            transition: background 0.2s;
+        }
+        
+        .pid-reset:hover {
+            background: #64748b;
+        }
+        
+        /* Botón emergencia */
+        .emergency-button {
+            width: 100%;
+            padding: 25px;
+            font-size: 1.5em;
+            font-weight: bold;
+            border: none;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
             margin-top: 20px;
         }
         
-        .emergency-button {
-            width: 100%;
-            padding: 30px;
-            font-size: 2em;
-            font-weight: bold;
-            border: none;
-            border-radius: 20px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
-        }
-        
         .emergency-button.active {
-            background: linear-gradient(135deg, #dc2626 0%, #991b1b 100%);
+            background: #dc2626;
             color: white;
         }
         
         .emergency-button.active:hover {
-            background: linear-gradient(135deg, #991b1b 0%, #7f1d1d 100%);
-            transform: scale(1.05);
-        }
-        
-        .emergency-button.active:active {
-            transform: scale(0.95);
+            background: #b91c1c;
         }
         
         .emergency-button.stopped {
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+            background: #10b981;
             color: white;
         }
         
         .emergency-button.stopped:hover {
-            background: linear-gradient(135deg, #059669 0%, #047857 100%);
+            background: #059669;
         }
         
-        /* Log de consola */
+        /* Consola */
         .console {
             background: #1e293b;
-            border-radius: 15px;
-            padding: 20px;
+            border-radius: 10px;
+            padding: 15px;
             margin-top: 20px;
-            max-height: 300px;
+            max-height: 250px;
             overflow-y: auto;
             font-family: 'Courier New', monospace;
-            font-size: 0.9em;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            font-size: 0.85em;
+            border: 1px solid #475569;
         }
         
         .console-line {
-            padding: 5px 0;
+            padding: 4px 0;
             color: #94a3b8;
         }
         
-        .console-line.error {
-            color: #f87171;
-        }
+        .console-line.error { color: #ef4444; }
+        .console-line.warning { color: #f59e0b; }
+        .console-line.info { color: #3b82f6; }
         
-        .console-line.warning {
-            color: #fbbf24;
-        }
-        
-        .console-line.info {
-            color: #60a5fa;
-        }
-        
-        /* Indicador de conexión */
-        .connection-indicator {
+        /* Indicador conexión */
+        .connection-dot {
             position: fixed;
-            top: 20px;
-            right: 20px;
-            width: 20px;
-            height: 20px;
+            top: 15px;
+            right: 15px;
+            width: 15px;
+            height: 15px;
             border-radius: 50%;
             background: #10b981;
-            box-shadow: 0 0 20px #10b981;
-            animation: pulse 2s infinite;
+            box-shadow: 0 0 10px #10b981;
         }
         
-        .connection-indicator.disconnected {
-            background: #dc2626;
-            box-shadow: 0 0 20px #dc2626;
-        }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+        .connection-dot.disconnected {
+            background: #ef4444;
+            box-shadow: 0 0 10px #ef4444;
         }
         
         /* Responsive */
-        @media (max-width: 600px) {
-            .data-grid {
+        @media (max-width: 768px) {
+            .main-grid {
                 grid-template-columns: 1fr;
             }
             
             .sensor-box {
-                width: 90px;
-                height: 90px;
+                width: 80px;
+                height: 80px;
                 font-size: 2em;
             }
             
             .sensor-label {
-                width: 90px;
-                font-size: 0.9em;
+                width: 80px;
+                font-size: 0.8em;
             }
         }
     </style>
 </head>
 <body>
-    <div class="connection-indicator" id="connectionIndicator"></div>
+    <div class="connection-dot" id="connectionDot"></div>
     
     <div class="container">
         <div class="header">
-            <h1>Robot Seguidor de Líneas</h1>
+            <h1>Robot Seguidor de Lineas</h1>
             <div class="status" id="statusText">Conectando...</div>
         </div>
         
-        <!-- Panel de sensores -->
-        <div class="sensor-panel">
-            <div class="sensor-title">Sensores de Línea</div>
-            
-            <div class="sensor-visual">
-                <div class="sensor-box off" id="sensorLeft">░</div>
-                <div class="sensor-box off" id="sensorCenter">░</div>
-                <div class="sensor-box off" id="sensorRight">░</div>
-            </div>
-            
-            <div class="sensor-labels">
-                <div class="sensor-label">Izquierda</div>
-                <div class="sensor-label">Centro</div>
-                <div class="sensor-label">Derecha</div>
-            </div>
-            
-            <!-- Datos del robot -->
-            <div class="data-grid">
-                <div class="data-item">
-                    <div class="data-label">Error de posición</div>
-                    <div class="data-value error" id="errorValue">0.00</div>
+        <div class="main-grid">
+            <!-- Sensores y datos -->
+            <div>
+                <div class="panel">
+                    <div class="panel-title">Sensores de Linea</div>
+                    
+                    <div class="sensor-visual">
+                        <div class="sensor-box off" id="sensorLeft">-</div>
+                        <div class="sensor-box off" id="sensorCenter">-</div>
+                        <div class="sensor-box off" id="sensorRight">-</div>
+                    </div>
+                    
+                    <div class="sensor-labels">
+                        <div class="sensor-label">Izquierda</div>
+                        <div class="sensor-label">Centro</div>
+                        <div class="sensor-label">Derecha</div>
+                    </div>
                 </div>
                 
-                <div class="data-item">
-                    <div class="data-label">Corrección PID</div>
-                    <div class="data-value correction" id="correctionValue">0</div>
-                </div>
-                
-                <div class="data-item">
-                    <div class="data-label">Velocidad actual</div>
-                    <div class="data-value speed" id="speedValue">0</div>
-                </div>
-                
-                <div class="data-item">
-                    <div class="data-label">Distancia obstáculo</div>
-                    <div class="data-value" id="distanceValue">-- cm</div>
+                <div class="panel" style="margin-top: 20px;">
+                    <div class="panel-title">Datos del Robot</div>
+                    
+                    <div class="data-row">
+                        <span class="data-label">Error de posicion</span>
+                        <span class="data-value" id="errorValue">0.00</span>
+                    </div>
+                    
+                    <div class="data-row">
+                        <span class="data-label">Correccion PID</span>
+                        <span class="data-value" id="correctionValue">0</span>
+                    </div>
+                    
+                    <div class="data-row">
+                        <span class="data-label">Velocidad actual</span>
+                        <span class="data-value" id="speedValue">0</span>
+                    </div>
+                    
+                    <div class="data-row">
+                        <span class="data-label">Distancia obstaculo</span>
+                        <span class="data-value" id="distanceValue">-- cm</span>
+                    </div>
+                    
+                    <div class="data-row">
+                        <span class="data-label">Iteraciones</span>
+                        <span class="data-value" id="iterationValue">0</span>
+                    </div>
                 </div>
             </div>
             
-            <div class="data-item" style="margin-top: 15px;">
-                <div class="data-label">Iteraciones</div>
-                <div class="data-value" id="iterationValue">0</div>
+            <!-- Control PID -->
+            <div>
+                <div class="panel">
+                    <div class="panel-title">Control PID en Tiempo Real</div>
+                    
+                    <div class="pid-control">
+                        <div class="pid-slider">
+                            <div class="pid-slider-label">
+                                <span class="pid-name">Kp (Proporcional)</span>
+                                <span class="pid-value" id="kpValue">400</span>
+                            </div>
+                            <input type="range" id="kpSlider" min="0" max="1000" value="400" step="10">
+                        </div>
+                        
+                        <div class="pid-slider">
+                            <div class="pid-slider-label">
+                                <span class="pid-name">Ki (Integral)</span>
+                                <span class="pid-value" id="kiValue">30</span>
+                            </div>
+                            <input type="range" id="kiSlider" min="0" max="100" value="30" step="1">
+                        </div>
+                        
+                        <div class="pid-slider">
+                            <div class="pid-slider-label">
+                                <span class="pid-name">Kd (Derivativo)</span>
+                                <span class="pid-value" id="kdValue">180</span>
+                            </div>
+                            <input type="range" id="kdSlider" min="0" max="500" value="180" step="10">
+                        </div>
+                        
+                        <button class="pid-reset" onclick="resetPID()">Restablecer valores por defecto</button>
+                    </div>
+                </div>
+                
+                <button class="emergency-button active" id="emergencyButton" onclick="toggleEmergency()">
+                    PARADA DE EMERGENCIA
+                </button>
             </div>
         </div>
         
-        <!-- Botón de emergencia -->
-        <div class="emergency-section">
-            <button class="emergency-button active" id="emergencyButton" onclick="toggleEmergency()">
-                🛑 PARADA DE EMERGENCIA
-            </button>
-        </div>
-        
-        <!-- Consola de logs -->
+        <!-- Consola -->
         <div class="console" id="console">
-            <div class="console-line info">Esperando conexión con el robot...</div>
+            <div class="console-line info">Esperando conexion con el robot...</div>
         </div>
     </div>
     
@@ -333,18 +404,40 @@
         let isEmergencyActive = false;
         let reconnectInterval = null;
         
-        // Conectar al WebSocket del robot
+        // Valores PID por defecto
+        const DEFAULT_PID = { kp: 400, ki: 30, kd: 180 };
+        
+        // Configurar sliders PID
+        document.getElementById('kpSlider').addEventListener('input', function(e) {
+            const value = e.target.value;
+            document.getElementById('kpValue').textContent = value;
+            sendPIDUpdate('kp', parseFloat(value));
+        });
+        
+        document.getElementById('kiSlider').addEventListener('input', function(e) {
+            const value = e.target.value;
+            document.getElementById('kiValue').textContent = value;
+            sendPIDUpdate('ki', parseFloat(value));
+        });
+        
+        document.getElementById('kdSlider').addEventListener('input', function(e) {
+            const value = e.target.value;
+            document.getElementById('kdValue').textContent = value;
+            sendPIDUpdate('kd', parseFloat(value));
+        });
+        
+        // Conectar al WebSocket
         function connect() {
             const host = window.location.hostname || 'localhost';
-            const port = 8765;  // Puerto WebSocket
+            const port = 8765;
             
             try {
                 ws = new WebSocket(`ws://${host}:${port}`);
                 
                 ws.onopen = function() {
                     console.log('Conectado al robot');
-                    updateStatus('Conectado al robot', true);
-                    addConsoleLog('✓ Conexión establecida', 'info');
+                    updateStatus('Conectado', true);
+                    addConsoleLog('Conexion establecida', 'info');
                     
                     if (reconnectInterval) {
                         clearInterval(reconnectInterval);
@@ -363,16 +456,15 @@
                 
                 ws.onerror = function(error) {
                     console.error('WebSocket error:', error);
-                    updateStatus('Error de conexión', false);
-                    addConsoleLog('❌ Error de conexión', 'error');
+                    updateStatus('Error de conexion', false);
+                    addConsoleLog('Error de conexion', 'error');
                 };
                 
                 ws.onclose = function() {
-                    console.log('Desconectado del robot');
+                    console.log('Desconectado');
                     updateStatus('Desconectado - Reintentando...', false);
-                    addConsoleLog('⚠️  Conexión perdida - Reintentando...', 'warning');
+                    addConsoleLog('Conexion perdida - Reintentando...', 'warning');
                     
-                    // Reintentar conexión cada 3 segundos
                     if (!reconnectInterval) {
                         reconnectInterval = setInterval(connect, 3000);
                     }
@@ -384,26 +476,57 @@
             }
         }
         
-        // Actualizar visualización con datos del robot
+        // Enviar actualización de PID al robot
+        function sendPIDUpdate(param, value) {
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    command: 'update_pid',
+                    param: param,
+                    value: value
+                }));
+                addConsoleLog(`PID actualizado: ${param.toUpperCase()} = ${value}`, 'info');
+            }
+        }
+        
+        // Resetear PID a valores por defecto
+        function resetPID() {
+            document.getElementById('kpSlider').value = DEFAULT_PID.kp;
+            document.getElementById('kpValue').textContent = DEFAULT_PID.kp;
+            
+            document.getElementById('kiSlider').value = DEFAULT_PID.ki;
+            document.getElementById('kiValue').textContent = DEFAULT_PID.ki;
+            
+            document.getElementById('kdSlider').value = DEFAULT_PID.kd;
+            document.getElementById('kdValue').textContent = DEFAULT_PID.kd;
+            
+            if (ws && ws.readyState === WebSocket.OPEN) {
+                ws.send(JSON.stringify({
+                    command: 'reset_pid',
+                    kp: DEFAULT_PID.kp,
+                    ki: DEFAULT_PID.ki,
+                    kd: DEFAULT_PID.kd
+                }));
+                addConsoleLog('PID restablecido a valores por defecto', 'info');
+            }
+        }
+        
+        // Actualizar visualización
         function updateDisplay(data) {
-            // Actualizar sensores visuales
             updateSensor('sensorLeft', data.sensor_left);
             updateSensor('sensorCenter', data.sensor_center);
             updateSensor('sensorRight', data.sensor_right);
             
-            // Actualizar valores
             document.getElementById('errorValue').textContent = data.error.toFixed(2);
             document.getElementById('correctionValue').textContent = Math.round(data.correction);
             document.getElementById('speedValue').textContent = data.speed;
             document.getElementById('distanceValue').textContent = data.distance + ' cm';
             document.getElementById('iterationValue').textContent = data.iterations;
             
-            // Log en consola
-            const visual = (data.sensor_left ? '█' : '░') + 
-                          (data.sensor_center ? '█' : '░') + 
-                          (data.sensor_right ? '█' : '░');
+            const visual = (data.sensor_left ? 'I' : '-') + 
+                          (data.sensor_center ? 'C' : '-') + 
+                          (data.sensor_right ? 'D' : '-');
             
-            const logLine = `${visual} | Err:${data.error.toFixed(2)} | Corr:${Math.round(data.correction)} | Vel:${data.speed} | #${data.iterations}`;
+            const logLine = `${visual} | Err:${data.error.toFixed(2)} | Corr:${Math.round(data.correction)} | Vel:${data.speed}`;
             addConsoleLog(logLine, '');
         }
         
@@ -413,49 +536,45 @@
             if (isActive) {
                 element.classList.remove('off');
                 element.classList.add('on');
-                element.textContent = '█';
+                element.textContent = 'X';
             } else {
                 element.classList.remove('on');
                 element.classList.add('off');
-                element.textContent = '░';
+                element.textContent = '-';
             }
         }
         
-        // Actualizar estado de conexión
+        // Actualizar estado conexión
         function updateStatus(text, connected) {
-            const statusElement = document.getElementById('statusText');
-            const indicator = document.getElementById('connectionIndicator');
-            
-            statusElement.textContent = text;
+            document.getElementById('statusText').textContent = text;
+            const dot = document.getElementById('connectionDot');
             
             if (connected) {
-                statusElement.classList.remove('disconnected');
-                indicator.classList.remove('disconnected');
+                document.getElementById('statusText').classList.remove('disconnected');
+                dot.classList.remove('disconnected');
             } else {
-                statusElement.classList.add('disconnected');
-                indicator.classList.add('disconnected');
+                document.getElementById('statusText').classList.add('disconnected');
+                dot.classList.add('disconnected');
             }
         }
         
-        // Botón de emergencia
+        // Botón emergencia
         function toggleEmergency() {
             isEmergencyActive = !isEmergencyActive;
-            
             const button = document.getElementById('emergencyButton');
             
             if (isEmergencyActive) {
                 button.classList.remove('active');
                 button.classList.add('stopped');
-                button.textContent = '✓ ROBOT DETENIDO - Click para reanudar';
-                addConsoleLog('🚨 PARADA DE EMERGENCIA ACTIVADA', 'error');
+                button.textContent = 'ROBOT DETENIDO - Click para reanudar';
+                addConsoleLog('PARADA DE EMERGENCIA ACTIVADA', 'error');
             } else {
                 button.classList.remove('stopped');
                 button.classList.add('active');
-                button.textContent = '🛑 PARADA DE EMERGENCIA';
-                addConsoleLog('✓ Robot reanudado', 'info');
+                button.textContent = 'PARADA DE EMERGENCIA';
+                addConsoleLog('Robot reanudado', 'info');
             }
             
-            // Enviar comando al robot
             if (ws && ws.readyState === WebSocket.OPEN) {
                 ws.send(JSON.stringify({
                     command: 'emergency_stop',
@@ -464,7 +583,7 @@
             }
         }
         
-        // Añadir línea a la consola
+        // Añadir línea a consola
         function addConsoleLog(message, type) {
             const consoleElement = document.getElementById('console');
             const line = document.createElement('div');
@@ -475,25 +594,20 @@
             
             consoleElement.appendChild(line);
             
-            // Mantener solo últimas 50 líneas
             while (consoleElement.children.length > 50) {
                 consoleElement.removeChild(consoleElement.firstChild);
             }
             
-            // Auto-scroll al final
             consoleElement.scrollTop = consoleElement.scrollHeight;
         }
         
-        // Iniciar conexión al cargar la página
+        // Iniciar
         window.onload = function() {
             connect();
         };
         
-        // Cerrar conexión al salir
         window.onbeforeunload = function() {
-            if (ws) {
-                ws.close();
-            }
+            if (ws) ws.close();
         };
     </script>
 </body>
