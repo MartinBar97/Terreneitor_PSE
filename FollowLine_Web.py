@@ -44,7 +44,103 @@ SENSOR_ERROR_MAP = {
 
 # ==================== INTERFAZ WEB (HTML/JS) ====================
 # Contiene el diseño del Dashboard y la lógica del cliente para enviar y recibir datos
-HTML_INTERFACE = """...""" # [Se omite el texto largo del HTML por brevedad, pero el código lo envía al navegador]
+HTML_INTERFACE = HTML_INTERFACE = """
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>TERRENEITOR</title>
+  <style>
+    body { background:#0e0e0e; color:#00ff88; font-family:monospace; text-align:center; }
+    .panel { display:inline-block; border:2px solid #333; border-radius:12px; padding:20px; margin-top:30px; width:380px; }
+    .sensor { display:inline-block; width:40px; height:40px; margin:5px; border:1px solid #444; border-radius:6px; background:#111; }
+    .sensor.active { background:#00ff88; box-shadow:0 0 10px #00ff88; }
+    button { background:#aa0000; color:white; border:none; padding:12px 20px; font-size:16px; border-radius:8px; cursor:pointer; }
+    button.active { background:#00aa00; }
+    .slider { width:100%; }
+    .value { float:right; }
+  </style>
+</head>
+<body>
+
+  <h1>-- TERRENEITOR --</h1>
+
+  <div class="panel">
+    <div id="status"> DESCONECTADO</div>
+    <p>Iteraciones: <span id="it">0</span></p>
+    <p>Error: <span id="err">0</span></p>
+
+    <div>
+      <div id="sL" class="sensor"></div>
+      <div id="sC" class="sensor"></div>
+      <div id="sR" class="sensor"></div>
+    </div>
+
+    <button id="stopBtn">⛔ PARAR</button>
+
+    <h3>PID</h3>
+
+    <label>Kp <span id="kpVal" class="value"></span></label>
+    <input id="kp" type="range" min="0" max="1500" step="10" value="700" class="slider">
+
+    <label>Ki <span id="kiVal" class="value"></span></label>
+    <input id="ki" type="range" min="0" max="500" step="5" value="0" class="slider">
+
+    <label>Kd <span id="kdVal" class="value"></span></label>
+    <input id="kd" type="range" min="0" max="800" step="10" value="300" class="slider">
+  </div>
+
+  <script>
+    let ws;
+    let emergency = false;
+
+    function connect() {
+      ws = new WebSocket(`ws://${location.hostname}:8765`);
+      ws.onopen = () => status.innerText = "🟢 CONECTADO";
+      ws.onmessage = e => {
+        const d = JSON.parse(e.data);
+        it.innerText = d.iterations;
+        err.innerText = d.error.toFixed(2);
+        sL.className = d.sensor_left ? "sensor active" : "sensor";
+        sC.className = d.sensor_center ? "sensor active" : "sensor";
+        sR.className = d.sensor_right ? "sensor active" : "sensor";
+      };
+      ws.onclose = () => {
+        status.innerText = "🔴 DESCONECTADO";
+        setTimeout(connect, 1000);
+      }
+    }
+
+    function sendPID() {
+      ws.send(JSON.stringify({
+        type: "pid",
+        kp: Number(kp.value),
+        ki: Number(ki.value),
+        kd: Number(kd.value)
+      }));
+    }
+
+    ["kp", "ki", "kd"].forEach(id => {
+      let el = document.getElementById(id);
+      document.getElementById(id + "Val").innerText = el.value;
+      el.oninput = () => {
+        document.getElementById(id + "Val").innerText = el.value;
+        sendPID();
+      }
+    });
+
+    stopBtn.onclick = () => {
+      emergency = !emergency;
+      ws.send(JSON.stringify({ type: "emergency", value: emergency }));
+      stopBtn.innerText = emergency ? "▶ REANUDAR" : "⛔ PARAR";
+      stopBtn.className = emergency ? "active" : "";
+    };
+
+    connect();
+  </script>
+</body>
+</html>
+""" 
 
 # Clase que gestiona las peticiones al servidor web (sirve el HTML arriba definido)
 class RobotHandler(BaseHTTPRequestHandler):
