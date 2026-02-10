@@ -23,10 +23,10 @@ from motor import Ordinary_Car
 
 # ==================== PARÁMETROS DE CONTROL ====================
 
-# Parámetros PID optimizados para seguimiento de línea
-KP = 800.0    # Ganancia proporcional (aumentado para rango -4095 a 4095)
-KI = 50.0     # Ganancia integral
-KD = 120.0    # Ganancia derivativa
+# Parámetros PID (Nota: Con la nueva lógica, KI actúa como Ti y KD como Td)
+KP = 800.0    # Ganancia proporcional
+KI = 50.0     # Ahora representa Ti en la nueva fórmula
+KD = 120.0    # Ahora representa Td en la nueva fórmula
 
 # Velocidad base de los motores (en rango -4095 a +4095)
 BASE_SPEED = 1200   # Velocidad nominal para avanzar
@@ -37,14 +37,6 @@ SAMPLE_TIME = 0.01  # Tiempo de muestreo en segundos (100 Hz)
 QUEUE_SIZE = 5      # Tamaño del buffer para filtrado (reducido para más respuesta)
 
 # Mapeo de patrones de sensores a error de posición
-# Los sensores usan gpiozero.LineSensor que devuelve:
-# value=1 cuando detecta LÍNEA NEGRA
-# value=0 cuando detecta FONDO BLANCO
-
-# La función read_all_infrared() devuelve:
-# (sensor1 << 2) | (sensor2 << 1) | sensor3
-# sensor1=izquierda, sensor2=centro, sensor3=derecha
-
 SENSOR_ERROR_MAP = {
     0b000: None,     # 0: Todos en blanco - fuera de línea
     0b001: 1.0,      # 1: Solo derecha en negro - girar DERECHA
@@ -147,82 +139,101 @@ class LineSensorThread:
 
 class PIDController:
     """
-    Controlador PID para seguimiento de línea.
-    Optimizado para el rango de motores Freenove (-4095 a +4095).
+    Controlador PID modificado con lógica CyberPi/mBot2.
+    Implementa filtro derivativo y ecuaciones de diferencia específicas.
     """
     
     def __init__(self, kp, ki, kd, sample_time):
+        # Asignación de parámetros según la lógica nueva
         self.kp = kp
-        self.ki = ki
-        self.kd = kd
+        self.ki = ki  # Actuará como Ti en la nueva fórmula
+        self.kd = kd  # Actuará como Td en la nueva fórmula
         self.sample_time = sample_time
         
-        # Estados internos
-        self.last_error = 0.0
-        self.integral = 0.0
+        # Constante del filtro derivativo (del código CyberPi)
+        self.N = 5.0
+        
+        # Variables de estado (Histórico)
+        self.ek_1 = 0.0   # Error anterior (k-1)
+        self.uDk_1 = 0.0  # Salida derivativa anterior
+        self.uIk_1 = 0.0  # Salida integral anterior
+        
+        # Control de tiempo
         self.last_time = time.time()
         self.last_output = 0.0
-        
-        # Límites de integral (anti-windup)
-        self.integral_max = 500.0
-        self.integral_min = -500.0
         
         # Control de threading
         self.lock = threading.Lock()
         
-        print(f"✓ PID inicializado (Kp={kp}, Ki={ki}, Kd={kd})")
+        print(f"✓ PID (Lógica CyberPi) inicializado (Kp={kp}, Ti={ki}, Td={kd}, N={self.N})")
     
     def compute(self, error):
         """
-        Calcula la salida del controlador PID.
+        Calcula la salida del controlador PID usando las ecuaciones discretas del mBot2.
         
         Args:
-            error (float): Error actual de posición (-1.0 a +1.0)
+            error (float): Error actual de posición
             
         Returns:
-            float: Señal de control (corrección para motores)
+            float: Señal de control (uk)
         """
         with self.lock:
             current_time = time.time()
             dt = current_time - self.last_time
             
-            # Evitar división por cero
+            # Evitar división por cero o saltos muy grandes al inicio
             if dt < 0.001:
                 return self.last_output
             
-            # Término Proporcional
-            p_term = self.kp * error
+            # Variables locales mapeadas a la nomenclatura de la fórmula CyberPi
+            # In (0) - Sensor = ek. Aquí 'error' ya es (0 - lectura) o equivalente
+            ek = error  
+            T = dt
+            Kp = self.kp
+            Ti = self.ki
+            Td = self.kd
+            N = self.N
             
-            # Término Integral (con anti-windup)
-            self.integral += error * dt
-            self.integral = max(self.integral_min, 
-                              min(self.integral_max, self.integral))
-            i_term = self.ki * self.integral
+            # Cálculo de Tlag
+            Tlag = Td / N
             
-            # Término Derivativo
-            derivative = (error - self.last_error) / dt
-            d_term = self.kd * derivative
+            # 1. Calcular Término Proporcional
+            uP = Kp * ek
             
-            # Salida total
-            output = p_term + i_term + d_term
+            # 2. Calcular Término Derivativo (con filtro)
+            # Fórmula original: uD = ((Tlag * 2 - T)*uDk_1+2*Kp*Td*(ek-ek_1))/(T+2*Tlag)
+            denominator = T + 2 * Tlag
+            if denominator == 0: denominator = 1e-6 # Protección matemática
             
-            # Limitar salida al máximo permitido
-            output = max(-MAX_CORRECTION, min(MAX_CORRECTION, output))
+            uD = ((Tlag * 2 - T) * self.uDk_1 + 2 * Kp * Td * (ek - self.ek_1)) / denominator
             
-            # Actualizar estados
-            self.last_error = error
+            # 3. Calcular Término Integral
+            # Fórmula original: uI = uIk_1+((T*(ek+ek_1)*Kp)/2*Ti)
+            uI = self.uIk_1 + ((T * (ek + self.ek_1) * Kp) / 2 * Ti)
+            
+            # 4. Salida total (uk)
+            uk = uP + uD + uI
+            
+            # Actualizar variables históricas para el siguiente ciclo
+            self.ek_1 = ek
+            self.uDk_1 = uD
+            self.uIk_1 = uI
             self.last_time = current_time
-            self.last_output = output
             
+            # Limitar salida al máximo permitido (Clamp)
+            output = max(-MAX_CORRECTION, min(MAX_CORRECTION, uk))
+            
+            self.last_output = output
             return output
     
     def reset(self):
-        """Reinicia el controlador PID"""
+        """Reinicia el controlador PID y sus estados históricos"""
         with self.lock:
-            self.integral = 0.0
-            self.last_error = 0.0
-            self.last_time = time.time()
+            self.ek_1 = 0.0
+            self.uDk_1 = 0.0
+            self.uIk_1 = 0.0
             self.last_output = 0.0
+            self.last_time = time.time()
 
 
 # ==================== CLASE CONTROL DE MOTORES ====================
@@ -359,11 +370,12 @@ class LineFollowerRobot:
     def __init__(self):
         print("\n" + "="*60)
         print("  ROBOT SEGUIDOR DE LÍNEAS FREENOVE - MECANUM")
-        print("  Control PID + Threading + Clases Originales")
+        print("  Control PID (Lógica CyberPi) + Threading + Clases Originales")
         print("="*60 + "\n")
         
         # Componentes del sistema
         self.sensors = LineSensorThread()
+        # Se pasan KP, KI (como Ti), KD (como Td)
         self.pid = PIDController(KP, KI, KD, SAMPLE_TIME)
         self.motors = MotorControlThread()
         
