@@ -300,8 +300,3 @@ if __name__=="__main__":
         RobotSystem().start()
     except KeyboardInterrupt:
         Ordinary_Car().set_motor_model(0,0,0,0) #se se presiona o final control C párase o robot
-<<<<<<< HEAD
-      
-=======
-      
->>>>>>> 96128d86ba42a618c60d255d84a12533b8276e26
