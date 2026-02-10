@@ -23,10 +23,10 @@ from motor import Ordinary_Car
 
 # ==================== PARÁMETROS DE CONTROL ====================
 
-# Parámetros PID (Nota: Con la nueva lógica, KI actúa como Ti y KD como Td)
+# Parámetros PID
 KP = 800.0    # Ganancia proporcional
-KI = 50.0     # Ahora representa Ti en la nueva fórmula
-KD = 120.0    # Ahora representa Td en la nueva fórmula
+KI = 50.0     # Ganancia integral
+KD = 120.0    # Ganancia derivativa
 
 # Velocidad base de los motores (en rango -4095 a +4095)
 BASE_SPEED = 1200   # Velocidad nominal para avanzar
@@ -144,13 +144,13 @@ class PIDController:
     """
     
     def __init__(self, kp, ki, kd, sample_time):
-        # Asignación de parámetros según la lógica nueva
+        # Asignación de parámetros según la lógica 
         self.kp = kp
-        self.ki = ki  # Actuará como Ti en la nueva fórmula
-        self.kd = kd  # Actuará como Td en la nueva fórmula
+        self.ki = ki  
+        self.kd = kd  
         self.sample_time = sample_time
         
-        # Constante del filtro derivativo (del código CyberPi)
+        # Constante del filtro derivativo 
         self.N = 5.0
         
         # Variables de estado (Histórico)
@@ -165,11 +165,11 @@ class PIDController:
         # Control de threading
         self.lock = threading.Lock()
         
-        print(f"✓ PID (Lógica CyberPi) inicializado (Kp={kp}, Ti={ki}, Td={kd}, N={self.N})")
+        print(f"✓ PID  inicializado (Kp={kp}, Ti={ki}, Td={kd}, N={self.N})")
     
     def compute(self, error):
         """
-        Calcula la salida del controlador PID usando las ecuaciones discretas del mBot2.
+        Calcula la salida del controlador PID.
         
         Args:
             error (float): Error actual de posición
@@ -185,8 +185,8 @@ class PIDController:
             if dt < 0.001:
                 return self.last_output
             
-            # Variables locales mapeadas a la nomenclatura de la fórmula CyberPi
-            # In (0) - Sensor = ek. Aquí 'error' ya es (0 - lectura) o equivalente
+            # Variables locales mapeadas 
+           
             ek = error  
             T = dt
             Kp = self.kp
@@ -200,15 +200,13 @@ class PIDController:
             # 1. Calcular Término Proporcional
             uP = Kp * ek
             
-            # 2. Calcular Término Derivativo (con filtro)
-            # Fórmula original: uD = ((Tlag * 2 - T)*uDk_1+2*Kp*Td*(ek-ek_1))/(T+2*Tlag)
+            # 2. Calcular Término Derivativo con filtro
             denominator = T + 2 * Tlag
             if denominator == 0: denominator = 1e-6 # Protección matemática
             
             uD = ((Tlag * 2 - T) * self.uDk_1 + 2 * Kp * Td * (ek - self.ek_1)) / denominator
             
             # 3. Calcular Término Integral
-            # Fórmula original: uI = uIk_1+((T*(ek+ek_1)*Kp)/2*Ti)
             uI = self.uIk_1 + ((T * (ek + self.ek_1) * Kp) / 2 * Ti)
             
             # 4. Salida total (uk)
@@ -370,7 +368,7 @@ class LineFollowerRobot:
     def __init__(self):
         print("\n" + "="*60)
         print("  ROBOT SEGUIDOR DE LÍNEAS FREENOVE - MECANUM")
-        print("  Control PID (Lógica CyberPi) + Threading + Clases Originales")
+        print("  Control PID")
         print("="*60 + "\n")
         
         # Componentes del sistema
