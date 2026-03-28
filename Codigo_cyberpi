@@ -1,0 +1,155 @@
+import cyberpi
+import mbot2
+import time
+import _thread  # Librería para multitarea en CyberPi
+
+# Variables del sistema
+In = 0 #Variable de entrada que simboliza la lectura del sensor en el centro que sería = 0
+T = 0.01
+uPk_1 = 0
+uDk_1 = 0
+uIk_1 = 0
+uk = 0
+
+# PID parámetros
+Kp = 0.39
+Ti = 0.01
+Td = 0.05
+N = 5
+Tlag = Td/N
+
+# Variables del PID
+ek = 0
+ek_1 = 0
+target_speed = 97 # Velocidad base en % (entre -100 y 100)
+
+# Tiempo entre actualizaciones (10 ms = 0.01 s)
+dt = 0.01
+
+# Estado del sistema
+running = False
+system_active = True
+vel_in = 0
+acelerando = False
+
+# Función para obtener el error del sensor de línea
+def get_sensor_error():
+    """ Lee el sensor de línea y devuelve un valor de error """
+    sensor_values = cyberpi.quad_rgb_sensor.get_offset_track(1)
+    return sensor_values  # CyberPi ya devuelve un error balanceado
+
+# Función para ejecutar el control PID
+def pid_control():
+    global ek, ek_1, uP, uD, uI, uk, uDk_1, uIk_1, running
+    
+    while system_active:
+        if running:
+        
+            # Leer el error del sensor de línea
+            ek = In - get_sensor_error()
+
+            # Calcular PID
+            uP = Kp * ek
+            uD = ((Tlag * 2 - T)*uDk_1+2*Kp*Td*(ek-ek_1))/(T+2*Tlag)  
+            uI = uIk_1+((T*(ek+ek_1)*Kp)/2*Ti)
+            uk = uP+uD+uI
+            
+            ek_1 = ek
+            uDk_1 = uD
+            uIk_1 = uI
+
+            # Calcular velocidad de motores
+            left_speed = target_speed + uk
+            right_speed = -1*(target_speed - uk)
+            
+            if left_speed > 100:
+                right_speed = right_speed + (left_speed - 100)
+            
+            if right_speed < -100:
+                left_speed = left_speed + (right_speed + 100)
+            
+            
+            
+
+
+            # Limitar velocidades (-100 a 100)
+            left_speed = max(min(left_speed, 100), -100)
+            right_speed = max(min(right_speed, 100), -100)
+            
+           
+                
+            # Enviar valores a los motores
+            cyberpi.mbot2.drive_power(left_speed, right_speed)
+            
+            
+        else:
+            # Si no está corriendo, detener motores
+            cyberpi.mbot2.drive_power(0, 0)
+            
+        # Esperar dt antes de repetir
+        time.sleep(dt)
+
+# Función para verificar botones
+def check_buttons():
+    global running, system_active, vel_in, acelerando
+    
+    while system_active:
+        if cyberpi.controller.is_press('A'):  # Botón Play (A)
+            cyberpi.console.println("Sistema activado")
+            while cyberpi.controller.is_press('A'):  # Esperar a que suelten el botón
+                time.sleep(0.1)
+            while vel_in < target_speed:
+                acelerando = True
+                vel_in += 10
+                time.sleep(0.04)
+            running = True
+            acelerando = False
+            
+            
+            
+                
+        elif cyberpi.controller.is_press('B'):  # Botón Cuadrado (B)
+            vel_in = 0
+            running = False
+            global uPk_1,uDk_1,uIk_1,uk,ek,ek_1
+            uPk_1 = 0
+            uDk_1 = 0
+            uIk_1 = 0
+            uk = 0
+            ek = 0
+            ek_1 = 0
+            cyberpi.console.println("Sistema detenido")
+            cyberpi.mbot2.drive_power(0, 0)
+            while cyberpi.controller.is_press('B'):  # Esperar a que suelten el botón
+                time.sleep(0.1)
+        
+        time.sleep(0.05)  # Pequeña pausa para no saturar
+        
+def inicio ():
+    global vel_in, system_active, acelerando
+    while system_active:
+        if acelerando:
+            cyberpi.mbot2.drive_power(vel_in,-vel_in)
+            
+    
+    
+
+# Iniciar los hilos
+_thread.start_new_thread(pid_control, ())
+_thread.start_new_thread(check_buttons, ())
+_thread.start_new_thread(inicio, ())
+
+# Programa principal
+try:
+    cyberpi.console.println("Presione Play para iniciar")
+    cyberpi.console.println("Presione Cuadrado para detener")
+    
+    while system_active:
+        # Puedes agregar otras funciones aquí si es necesario
+        time.sleep(1)
+
+except KeyboardInterrupt:
+    # Si el usuario detiene el programa, apagar motores y salir
+    system_active = False
+    running = False
+    cyberpi.mbot2.drive_power(0, 0)
